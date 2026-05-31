@@ -2,6 +2,15 @@
 
 Stateful CLI harness for [JumpServer](https://www.jumpserver.com/) bastion host management.
 
+<!-- TODO: 录制 REPL 演示后,把下面的占位图替换为真实截图/GIF。
+     建议用 asciinema 或 vhs 录制 `cli-anything-jumpserver --interactive`,
+     导出为 docs/repl-demo.gif 即可自动显示。 -->
+<p align="center">
+  <img src="docs/repl-demo.gif" alt="cli-anything-jumpserver interactive REPL demo" width="720">
+  <br>
+  <em>Interactive REPL mode — demo placeholder</em>
+</p>
+
 ## Install as a Claude Code skill
 
 ```bash
