@@ -2,10 +2,17 @@
 
 Stateful CLI harness for [JumpServer](https://www.jumpserver.com/) bastion host management.
 
-## Installation
+## Install as a Claude Code skill
 
 ```bash
-cd agent-harness
+npx skills add Ayasaz/jumpserver-cli -g
+```
+
+## Installation (CLI)
+
+```bash
+git clone https://github.com/Ayasaz/jumpserver-cli
+cd jumpserver-cli
 pip install -e .
 ```
 
