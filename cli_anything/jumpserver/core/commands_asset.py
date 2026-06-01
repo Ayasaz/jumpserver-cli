@@ -31,10 +31,18 @@ def asset_group():
 @click.option("--active/--inactive", default=None, help="Filter by active status")
 @click.option("--limit", default=20, help="Results per page")
 @click.option("--offset", default=0, help="Pagination offset")
+@click.option("--mine", is_flag=True, default=False, help="List only assets authorized to the current user (perms/users/self/assets/). Auto-used as a fallback when the admin endpoint returns 403.")
 @click.option("--output", "-o", type=click.Choice(["table", "json", "yaml"]), default="table", help="Output format")
 @click.option("--columns", "-c", default=None, help="Comma-separated column names")
-def list_assets(asset_type, search, node, platform, active, limit, offset, output, columns):
-    """List assets of a given type."""
+def list_assets(asset_type, search, node, platform, active, limit, offset, mine, output, columns):
+    """List assets of a given type.
+
+    By default this queries the admin assets endpoint. Read-only / regular
+    accounts that lack admin permission will get HTTP 403 there; in that case
+    the command automatically falls back to the per-user "my assets" endpoint
+    (``perms/users/self/assets/``). Use ``--mine`` to force that self-service
+    endpoint directly.
+    """
     session = Session.load()
     client = require_auth(session)
 
@@ -44,6 +52,11 @@ def list_assets(asset_type, search, node, platform, active, limit, offset, outpu
         "ds": "directories", "custom": "customs",
     }
     endpoint = type_map.get(asset_type, "hosts")
+
+    # Force the self-service endpoint when asked.
+    if mine:
+        _list_my_assets(client, asset_type, search, active, output, columns)
+        return
 
     params = {"limit": limit, "offset": offset}
     if search:
@@ -56,8 +69,31 @@ def list_assets(asset_type, search, node, platform, active, limit, offset, outpu
         params["is_active"] = str(active).lower()
 
     resp = client.get(f"assets/{endpoint}/", params=params)
+
+    # Read-only accounts can't hit the admin endpoint; transparently fall back
+    # to the assets authorized to the current user.
+    if resp.status_code == 403:
+        click.echo(click.style(
+            "Admin asset listing denied (403); falling back to your authorized "
+            "assets (perms/users/self/assets/).", fg="yellow"), err=True)
+        _list_my_assets(client, asset_type, search, active, output, columns)
+        return
+
     handle_api_error(resp, "list assets")
     print_result(resp.json(), fmt=output, columns=columns)
+
+
+def _list_my_assets(client, asset_type, search, active, output, columns):
+    """List assets authorized to the current user, filtered by type/active."""
+    assets = client.my_assets(search=search)
+    # The self endpoint returns every category; filter to the requested type.
+    filtered = [
+        a for a in assets
+        if (a.get("category") or {}).get("value") == asset_type
+    ]
+    if active is not None:
+        filtered = [a for a in filtered if a.get("is_active") is active]
+    print_result(filtered, fmt=output, columns=columns)
 
 
 @asset_group.command(name="get")

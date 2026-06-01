@@ -268,6 +268,25 @@ All mutation commands support `--dry-run` to preview without execution:
 cli-anything-jumpserver asset create --name test --address 10.0.0.1 --platform 1 --dry-run --output json
 ```
 
+### Read-only / regular accounts (asset listing)
+`asset list` queries the **admin** assets endpoint, which read-only or regular
+accounts are not permitted to use (HTTP 403). The command handles this
+transparently:
+
+- On a 403, it **automatically falls back** to the per-user endpoint
+  `perms/users/self/assets/` (the assets authorized to the logged-in user) and
+  filters them by `--type` / `--active`.
+- Use `--mine` to query that self-service endpoint directly, skipping the admin
+  call entirely:
+  ```bash
+  cli-anything-jumpserver asset list --type host --mine --output json
+  cli-anything-jumpserver asset list --type database --mine
+  ```
+- Equivalent raw listing of everything authorized to you (all categories):
+  ```bash
+  cli-anything-jumpserver user my-assets --output json
+  ```
+
 ### Environment Variables
 - `JUMPSERVER_URL` - Default JumpServer URL
 - `JUMPSERVER_USERNAME` - Default username
