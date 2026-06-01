@@ -270,6 +270,6 @@ def my_assets(search, output):
     if search:
         params["search"] = search
 
-    resp = client.get("perms/my/assets/", params=params)
+    resp = client.get("perms/users/self/assets/", params=params)
     handle_api_error(resp, "list my assets")
     print_result(resp.json(), fmt=output)

@@ -160,6 +160,41 @@ class JumpServerClient:
         resp.raise_for_status()
         return resp.json()
 
+    def my_assets(self, search: str | None = None) -> list[dict[str, Any]]:
+        """List assets the current user is authorized to access."""
+        params = {"search": search} if search else None
+        resp = self.get("perms/users/self/assets/", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("results", data) if isinstance(data, dict) else data
+
+    def get_my_asset(self, asset_id: str) -> dict[str, Any]:
+        """Get details (incl. permed_accounts/protocols) of one authorized asset."""
+        resp = self.get(f"perms/users/self/assets/{asset_id}/")
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_connection_token(
+        self,
+        asset_id: str,
+        account: str,
+        protocol: str = "ssh",
+        connect_method: str = "ssh",
+        input_username: str = "",
+    ) -> dict[str, Any]:
+        """Create a connection token used to log in to an asset via the gateway."""
+        body = {
+            "asset": asset_id,
+            "account": account,
+            "protocol": protocol,
+            "connect_method": connect_method,
+        }
+        if input_username:
+            body["input_username"] = input_username
+        resp = self.post("authentication/connection-token/", data=body)
+        resp.raise_for_status()
+        return resp.json()
+
     def paginate(
         self, path: str, params: dict | None = None, limit: int = 100
     ):

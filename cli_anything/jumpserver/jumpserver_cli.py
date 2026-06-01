@@ -40,6 +40,7 @@ from cli_anything.jumpserver.core.commands_system import (
     label_group,
     role_group,
 )
+from cli_anything.jumpserver.core.commands_connect import connect_command
 
 
 class JumpserverCLI(click.Group):
@@ -58,6 +59,7 @@ class JumpserverCLI(click.Group):
         self.add_command(system_group)
         self.add_command(label_group)
         self.add_command(role_group)
+        self.add_command(connect_command)
 
     @staticmethod
     def _start_repl(ctx: click.Context) -> None:
@@ -94,6 +96,7 @@ class JumpServerREPL(cmd.Cmd):
         self._ctx = cli_ctx
         self._session = Session.load()
         self._available_commands = [
+            "connect",
             "auth login", "auth logout", "auth status", "auth org",
             "asset list", "asset get", "asset create", "asset update", "asset delete",
             "asset node list", "asset node create", "asset node delete",
@@ -175,6 +178,7 @@ class JumpServerREPL(cmd.Cmd):
 
         click.echo(click.style("\nJumpServer CLI Commands:", bold=True))
         groups = {
+            "Connect": ["connect <asset>"],
             "Authentication": ["auth login", "auth logout", "auth status", "auth org"],
             "Asset Management": [
                 "asset list", "asset get", "asset create", "asset update", "asset delete",
