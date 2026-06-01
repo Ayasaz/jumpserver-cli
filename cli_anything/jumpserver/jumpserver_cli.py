@@ -113,7 +113,7 @@ class JumpServerREPL(cmd.Cmd):
             "session list", "session get", "session replay", "session kill",
             "session command list", "session terminal list", "session terminal status",
             "audit login", "audit operate", "audit ftp", "audit password", "audit activity",
-            "ops job-list", "ops job-log", "ops adhoc-list", "ops playbook-list",
+            "ops run", "ops job-list", "ops job-log", "ops adhoc-list", "ops playbook-list",
             "system settings", "system health", "system info",
             "label list",
             "role list", "role bindings",
@@ -194,7 +194,8 @@ class JumpServerREPL(cmd.Cmd):
             "Sessions": ["session list", "session get", "session replay", "session kill",
                          "session command list", "session terminal *"],
             "Audit & Ops": ["audit login", "audit operate", "audit ftp", "audit password",
-                            "ops job-list", "ops job-log", "ops playbook-list"],
+                            "ops run <asset> <command>", "ops job-list", "ops job-log",
+                            "ops playbook-list"],
             "System": ["system settings", "system health", "system info",
                        "label list", "role list", "role bindings"],
         }
