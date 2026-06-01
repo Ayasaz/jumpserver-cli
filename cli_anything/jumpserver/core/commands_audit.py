@@ -3,6 +3,10 @@ Audit and operations commands for JumpServer CLI.
 
 Manages audit logs, login logs, operate logs, and job execution.
 """
+import base64 as _base64
+import re
+import time
+
 import click
 
 from cli_anything.jumpserver.core.session import Session
@@ -10,7 +14,20 @@ from cli_anything.jumpserver.utils import (
     require_auth,
     handle_api_error,
     print_result,
+    CLIError,
 )
+from cli_anything.jumpserver.core.commands_connect import (
+    _resolve_asset,
+    _pick_account,
+)
+
+# Sentinel markers used to delimit base64-encoded command output, so that
+# multi-line / binary / locale-mangled output survives the Ansible "raw"
+# transport and ANSI cleanup intact.
+_B64_START = "__JS_B64_START__"
+_B64_END = "__JS_B64_END__"
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 @click.group(name="audit")
@@ -215,3 +232,170 @@ def playbook_list(search, output):
     resp = client.get("ops/playbooks/", params=params)
     handle_api_error(resp, "list playbooks")
     print_result(resp.json(), fmt=output)
+
+
+# ─── Ad-hoc command execution (non-interactive SSH over the ops API) ──────
+
+
+def _clean_output(text: str) -> str:
+    """Strip ANSI escapes / CR / NULs from an execution log."""
+    text = _ANSI_RE.sub("", text)
+    return text.replace("\r\n", "\n").replace("\r", "").replace("\x00", "")
+
+
+def _wrap_base64(cmd: str) -> str:
+    """Wrap a command so its combined stdout/stderr is emitted base64-encoded
+    between sentinel markers (robust against ANSI/locale/multiline noise)."""
+    return (
+        f"echo {_B64_START}; {{ {cmd} ; }} 2>&1 | base64 | tr -d '\\n'; "
+        f"echo; echo {_B64_END}"
+    )
+
+
+def _decode_base64(text: str) -> str:
+    """Extract and decode the base64 blob delimited by the sentinels."""
+    if _B64_START not in text or _B64_END not in text:
+        return text
+    blob = text.split(_B64_START, 1)[1].split(_B64_END, 1)[0]
+    blob = "".join(blob.split())
+    try:
+        return _base64.b64decode(blob).decode("utf-8", "replace")
+    except Exception as exc:  # pragma: no cover - defensive
+        return f"[base64 decode error: {exc}]\n{blob[:500]}"
+
+
+def _fetch_execution_log(client, execution_id: str) -> str:
+    """Pull the full execution log, following the incremental ``mark`` cursor."""
+    full, mark = "", ""
+    for _ in range(60):
+        resp = client.get(
+            f"ops/ansible/job-execution/{execution_id}/log/",
+            params={"mark": mark},
+        )
+        if resp.status_code >= 400:
+            break
+        data = resp.json()
+        if not isinstance(data, dict):
+            break
+        full += data.get("data", "")
+        new_mark = data.get("mark", "")
+        if data.get("end") or new_mark == mark:
+            break
+        mark = new_mark
+        time.sleep(0.3)
+    return full
+
+
+@ops_group.command(name="run")
+@click.argument("target")
+@click.argument("command")
+@click.option("--account", "-a", default=None,
+              help="Account alias or username to run as (default: the only authorized one)")
+@click.option("--module", "-m", default="raw",
+              help="Ansible module to use (default: raw; e.g. shell, command)")
+@click.option("--timeout", "-t", "wait_timeout", default=120, type=int,
+              help="Seconds to wait for the job to finish (default: 120)")
+@click.option("--base64", "use_base64", is_flag=True, default=False,
+              help="Encode output as base64 in transit (robust for multiline/binary/locale-mangled output)")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Print the job payload without submitting it")
+@click.option("--output", "-o", type=click.Choice(["text", "json", "yaml"]), default="text",
+              help="Output format (default: text = just the command output)")
+def ops_run(target, command, account, module, wait_timeout, use_base64, dry_run, output):
+    """Run a shell COMMAND on an authorized asset (TARGET = name or id), non-interactively.
+
+    This submits a one-off ad-hoc job through the ops API and waits for the
+    result — a scriptable alternative to the interactive ``connect`` session.
+
+    \b
+    Examples:
+      jumpserver ops run warehouse-test "ls -lh /home/dev/logs"
+      jumpserver ops run warehouse-test "grep -c ERROR app.log" --account dev研发
+      jumpserver ops run warehouse-test "cat /etc/os-release" --base64 -o json
+    """
+    session = Session.load()
+    client = require_auth(session)
+
+    asset = _resolve_asset(client, target)
+    detail = client.get_my_asset(asset["id"])
+    chosen = _pick_account(detail, account)
+    runas = chosen.get("username") or chosen.get("alias")
+
+    args = _wrap_base64(command) if use_base64 else command
+    payload = {
+        "name": f"adhoc-cli-{int(time.time())}",
+        "module": module,
+        "args": args,
+        "assets": [detail["id"]],
+        "runas": runas,
+        "type": "adhoc",
+        "instant": True,
+        "is_periodic": False,
+        "crontab": "",
+        "interval": None,
+    }
+
+    if dry_run:
+        print_result(payload, fmt="json" if output == "text" else output)
+        return
+
+    resp = client.post("ops/jobs/", data=payload)
+    handle_api_error(resp, "create ad-hoc job")
+    job = resp.json()
+    execution_id = job.get("task_id") or job.get("id")
+    if not execution_id:
+        raise CLIError(
+            "Ad-hoc job created but no execution id was returned.",
+            f"Response: {str(job)[:300]}",
+        )
+
+    # Poll for completion.
+    execution = None
+    deadline = time.time() + wait_timeout
+    while time.time() < deadline:
+        time.sleep(2)
+        poll = client.get(f"ops/job-executions/{execution_id}/")
+        if poll.status_code >= 400:
+            continue
+        execution = poll.json()
+        if isinstance(execution, dict) and execution.get("is_finished"):
+            break
+    else:
+        raise CLIError(
+            f"Job did not finish within {wait_timeout}s (execution {execution_id}).",
+            "Increase --timeout, or inspect with 'ops job-log <execution_id>'.",
+        )
+
+    raw_log = _fetch_execution_log(client, execution_id)
+    text = _clean_output(raw_log)
+    if use_base64:
+        text = _decode_base64(text)
+
+    is_success = bool(execution.get("is_success")) if execution else False
+
+    if output in ("json", "yaml"):
+        print_result(
+            {
+                "execution_id": execution_id,
+                "asset": detail.get("name"),
+                "address": detail.get("address"),
+                "runas": runas,
+                "is_success": is_success,
+                "time_cost": execution.get("time_cost") if execution else None,
+                "output": text.strip(),
+            },
+            fmt=output,
+        )
+        return
+
+    # Default text mode: a short status header + the command output.
+    status = click.style("OK" if is_success else "FAILED",
+                         fg="green" if is_success else "red")
+    header = click.style(
+        f"# {detail.get('name')} ({detail.get('address')}) as {runas} ",
+        fg="cyan",
+    )
+    click.echo(f"{header}[{status}]")
+    click.echo(text.strip())
+    if not is_success:
+        raise SystemExit(1)

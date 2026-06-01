@@ -196,6 +196,8 @@ commands:
   - group: ops
     description: Manage operations and job execution
     subcommands:
+      - name: run
+        description: Run a shell command on an authorized asset non-interactively (scriptable alternative to `connect`); supports --account, --base64, --timeout, --dry-run, -o json
       - name: job-list
         description: List execution jobs
       - name: job-log
@@ -324,6 +326,29 @@ cli-anything-jumpserver session list --active --output json
 cli-anything-jumpserver session terminal list --output json
 cli-anything-jumpserver session terminal status <TERMINAL_ID> --output json
 ```
+
+**5. Run Remote Commands (non-interactive)**
+
+`connect` opens an *interactive* SSH session (a TUI an agent cannot drive).
+For scripted command execution and log inspection, use `ops run`, which
+submits a one-off ad-hoc job via the ops API and returns the output:
+```bash
+# Run a command on an authorized asset (TARGET = name or id)
+cli-anything-jumpserver ops run warehouse-test "ls -lh /home/dev/logs"
+
+# Pick a specific account, raise the wait timeout
+cli-anything-jumpserver ops run warehouse-test "tail -n 200 app.log" --account dev研发 --timeout 180
+
+# --base64 keeps multiline / non-ASCII / locale-mangled output intact;
+# -o json yields {execution_id, is_success, time_cost, output}
+cli-anything-jumpserver ops run warehouse-test "grep -c ERROR app.log" --base64 -o json
+
+# Preview the job payload without submitting
+cli-anything-jumpserver ops run warehouse-test "uptime" --dry-run
+```
+Notes: needs an authorized account on the asset (auto-picked if only one,
+else use `--account`); exits non-zero if the remote command fails; the
+default `raw` module works without Python on the target.
 
 ## Output Formats
 
