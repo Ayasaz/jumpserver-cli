@@ -40,21 +40,23 @@ def login(ctx, url, username, password, org, insecure, output):
         user_info = client.get_current_user()
         session._current_user = user_info
         session.save()
-
-        data = {
-            "status": "authenticated",
-            "username": user_info.get("username", username),
-            "name": user_info.get("name", ""),
-            "role": user_info.get("role", ""),
-            "org_id": session.org_id or "(default)",
-            "url": session.base_url,
-        }
-        print_result(data, fmt=output)
-        click.echo(click.style("\n✓ Login successful. Session saved.", fg="green"))
-
     except Exception as e:
+        # Only roll back the session for genuine auth/API failures. Cosmetic
+        # output errors (e.g. Windows GBK consoles choking on Unicode) must not
+        # discard a session that was already authenticated and persisted.
         session.clear()
         raise click.ClickException(f"Login failed: {e}")
+
+    data = {
+        "status": "authenticated",
+        "username": user_info.get("username", username),
+        "name": user_info.get("name", ""),
+        "role": user_info.get("role", ""),
+        "org_id": session.org_id or "(default)",
+        "url": session.base_url,
+    }
+    print_result(data, fmt=output)
+    click.echo(click.style("\n✓ Login successful. Session saved.", fg="green"))
 
 
 @auth_group.command(name="logout")

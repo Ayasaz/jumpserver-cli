@@ -264,8 +264,27 @@ def main(ctx, output_json, interactive, url):
         ctx.obj["interactive"] = True
 
 
+def _ensure_utf8_streams() -> None:
+    """Make stdout/stderr tolerant of non-ASCII output.
+
+    On Windows the console defaults to a legacy codepage (e.g. GBK/cp936),
+    which cannot encode characters such as the green check mark used in
+    success messages, raising UnicodeEncodeError mid-command. Reconfigure the
+    text streams to UTF-8 and, as a last resort, replace any character the
+    underlying console still cannot render so output never crashes the CLI.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def cli_main():
     """Entry point for console_scripts."""
+    _ensure_utf8_streams()
     try:
         main()
     except KeyboardInterrupt:
