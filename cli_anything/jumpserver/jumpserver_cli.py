@@ -194,7 +194,7 @@ class JumpServerREPL(cmd.Cmd):
             "Sessions": ["session list", "session get", "session replay", "session kill",
                          "session command list", "session terminal *"],
             "Audit & Ops": ["audit login", "audit operate", "audit ftp", "audit password",
-                            "ops run <asset> <command>", "ops job-list", "ops job-log",
+                            "ops run <asset> <command> [--transport koko|ops]", "ops job-list", "ops job-log",
                             "ops playbook-list"],
             "System": ["system settings", "system health", "system info",
                        "label list", "role list", "role bindings"],

@@ -2,7 +2,7 @@ from setuptools import setup, find_namespace_packages
 
 setup(
     name="cli-anything-jumpserver",
-    version="0.1.0",
+    version="0.2.0",
     description="Stateful CLI harness for JumpServer bastion host",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
@@ -13,6 +13,7 @@ setup(
         "click>=8.0",
         "requests>=2.28",
         "pyyaml>=6.0",
+        "websocket-client>=1.5",
     ],
     packages=find_namespace_packages(include=["cli_anything.*"]),
     namespace_packages=["cli_anything"],

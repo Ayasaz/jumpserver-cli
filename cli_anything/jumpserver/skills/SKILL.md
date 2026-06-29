@@ -1,7 +1,7 @@
 ---
 name: cli-anything-jumpserver
 description: Stateful CLI harness for JumpServer bastion host management. Supports asset, user, permission, account, session, audit, and operations management via REST API, with both one-shot and interactive REPL modes.
-version: 0.1.0
+version: 0.2.0
 category: infrastructure
 tags:
   - jumpserver
@@ -197,7 +197,8 @@ commands:
     description: Manage operations and job execution
     subcommands:
       - name: run
-        description: Run a shell command on an authorized asset non-interactively (scriptable alternative to `connect`); supports --account, --base64, --timeout, --dry-run, -o json
+        description: Run a shell command on an authorized asset non-interactively. Two transports — koko (default, Koko Web Terminal websocket) and ops (ad-hoc job engine). Supports --account, --transport, --timeout, --dry-run, -o json.
+        options: ["--account", "--transport", "--module", "--timeout", "--base64", "--dry-run", "--output"]
       - name: job-list
         description: List execution jobs
       - name: job-log
@@ -330,25 +331,33 @@ cli-anything-jumpserver session terminal status <TERMINAL_ID> --output json
 **5. Run Remote Commands (non-interactive)**
 
 `connect` opens an *interactive* SSH session (a TUI an agent cannot drive).
-For scripted command execution and log inspection, use `ops run`, which
-submits a one-off ad-hoc job via the ops API and returns the output:
+For scripted command execution and log inspection, use `ops run`.
+Two transports are available:
+
+| Transport | Default | How it works | When to use |
+|-----------|---------|-------------|-------------|
+| `koko` (default) | ✅ | Koko Web Terminal over websocket — drives a real PTY session via a connection token. | Works even when the Ops job engine (Celery/ansible) is down; needs `websocket-client` installed. |
+| `ops` | ❌ | Submits a one-off ad-hoc job through the Ops API and polls for completion. | Deployments where the Celery/ansible job worker is healthy. |
+
+**NOTES for agents:**
+- The default `--transport koko` establishes a Django web session during `auth login`. When that fails (e.g. the JumpServer instance uses non-standard cookie configuration), the login will report `web_session: unavailable` and warn you to fall back to `--transport ops`.
+- Koko accepts the account *alias/name* (e.g. `dev研发`), not the username; the `--account` flag auto-selects by alias when possible.
+- The ops job engine in some deployments keeps tasks queued forever (`task_id` = null); the koko path bypasses the job queue entirely.
+- `--base64` and `--module` apply only to `--transport ops`.
+
 ```bash
-# Run a command on an authorized asset (TARGET = name or id)
+# Run a command (default: koko web terminal)
 cli-anything-jumpserver ops run warehouse-test "ls -lh /home/dev/logs"
 
-# Pick a specific account, raise the wait timeout
+# Pick a specific account (koko)
 cli-anything-jumpserver ops run warehouse-test "tail -n 200 app.log" --account dev研发 --timeout 180
 
-# --base64 keeps multiline / non-ASCII / locale-mangled output intact;
-# -o json yields {execution_id, is_success, time_cost, output}
-cli-anything-jumpserver ops run warehouse-test "grep -c ERROR app.log" --base64 -o json
+# Fallback to the ops ad-hoc job engine
+cli-anything-jumpserver ops run warehouse-test "grep -c ERROR app.log" --transport ops -o json
 
-# Preview the job payload without submitting
+# Preview without executing
 cli-anything-jumpserver ops run warehouse-test "uptime" --dry-run
 ```
-Notes: needs an authorized account on the asset (auto-picked if only one,
-else use `--account`); exits non-zero if the remote command fails; the
-default `raw` module works without Python on the target.
 
 ## Output Formats
 

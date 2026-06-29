@@ -40,6 +40,9 @@ def login(ctx, url, username, password, org, insecure, output):
         user_info = client.get_current_user()
         session._current_user = user_info
         session.save()
+        # Also establish a web session so 'ops run --transport koko' works; the
+        # Koko terminal needs cookies, not the Bearer token. Best-effort only.
+        web_ok = client.web_login(username, password)
     except Exception as e:
         # Only roll back the session for genuine auth/API failures. Cosmetic
         # output errors (e.g. Windows GBK consoles choking on Unicode) must not
@@ -54,9 +57,14 @@ def login(ctx, url, username, password, org, insecure, output):
         "role": user_info.get("role", ""),
         "org_id": session.org_id or "(default)",
         "url": session.base_url,
+        "web_session": "ok" if web_ok else "unavailable",
     }
     print_result(data, fmt=output)
     click.echo(click.style("\n✓ Login successful. Session saved.", fg="green"))
+    if not web_ok:
+        click.echo(click.style(
+            "  (web session unavailable; 'ops run --transport koko' may fall back "
+            "to --transport ops)", fg="yellow"))
 
 
 @auth_group.command(name="logout")

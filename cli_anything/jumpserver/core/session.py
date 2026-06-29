@@ -3,13 +3,15 @@ Session management for JumpServer CLI.
 
 Manages API connection state, authentication tokens, and session persistence.
 """
+import html
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -32,6 +34,9 @@ class Session:
     org_name: str = ""
     verify_ssl: bool = True
     timeout: int = 30
+    # Django web-session cookies (sessionid/csrftoken), needed by the Koko web
+    # terminal which does not honour the Bearer API token.
+    web_cookies: dict[str, str] = field(default_factory=dict)
     _current_user: dict[str, Any] | None = field(default=None, repr=False)
 
     def save(self) -> None:
@@ -89,6 +94,11 @@ class JumpServerClient:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self._http.mount("http://", adapter)
         self._http.mount("https://", adapter)
+
+        # Restore any persisted Django web-session cookies for the Koko terminal.
+        host = urlparse(session.base_url).hostname or ""
+        for name, value in (session.web_cookies or {}).items():
+            self._http.cookies.set(name, value, domain=host)
 
     @property
     def headers(self) -> dict[str, str]:
@@ -149,6 +159,69 @@ class JumpServerClient:
         self.session.token_expiry = time.time() + 3600  # default 1h
         self.session.save()
         return data
+
+    def web_login(self, username: str, password: str) -> bool:
+        """Establish a Django web session (cookies) in addition to the API token.
+
+        The Koko web terminal (used by ``ops run --transport koko``) authenticates
+        by session cookie, not the Bearer API token, so we perform a form login
+        against ``/core/auth/login/`` and persist the resulting cookies. Best
+        effort: returns False instead of raising if the web login is unavailable.
+        """
+        base = self.session.base_url.rstrip("/")
+        login_url = f"{base}/core/auth/login/"
+        try:
+            page = self._http.get(
+                login_url, timeout=self.session.timeout,
+                headers={"Accept": "text/html"},
+            )
+            if page.status_code >= 400:
+                return False
+            csrf = self._http.cookies.get("csrftoken")
+            m = re.search(
+                r'name=["\']csrfmiddlewaretoken["\']\s+value=["\']([^"\']+)',
+                page.text,
+            )
+            if m:
+                csrf = html.unescape(m.group(1))
+            if not csrf:
+                return False
+
+            post = self._http.post(
+                login_url,
+                data={
+                    "username": username,
+                    "password": password,
+                    "csrfmiddlewaretoken": csrf,
+                    "next": "/",
+                },
+                headers={
+                    "Referer": login_url,
+                    "X-CSRFToken": csrf,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                allow_redirects=False,
+                timeout=self.session.timeout,
+            )
+            if post.status_code not in (302, 303):
+                return False
+            location = post.headers.get("Location") or ""
+            if "/core/auth/login/guard/" in location:
+                self._http.get(
+                    location if location.startswith("http") else f"{base}{location}",
+                    headers={"Referer": login_url},
+                    allow_redirects=False,
+                    timeout=self.session.timeout,
+                )
+        except requests.RequestException:
+            return False
+
+        cookies = {c.name: c.value for c in self._http.cookies}
+        if "sessionid" not in cookies and not any("sessionid" in k.lower() for k in cookies):
+            return False
+        self.session.web_cookies = cookies
+        self.session.save()
+        return True
 
     def logout(self) -> None:
         """Invalidate the session."""
